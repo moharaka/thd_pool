@@ -3,6 +3,7 @@
 #include <linux/spinlock.h>
 
 typedef long thd_pool_func(void* data);
+#define THP_NAME_MAX 256
 
 struct thd_pool_service {
 	/* function, argument, and return value of the service */
@@ -22,10 +23,11 @@ struct thd_pool_thread {
 };
 
 struct thd_pool {
-	long number;		/* total number of thread in the pool */
-	long in_list;		/* thread currently available in the pool */
-	long min, max;		/* min and max number of thread in the pool */
-	spinlock_t lock;	
+	char name[THP_NAME_MAX];
+	long number;		/* total number of created threads */
+	long in_list;		/* thread currently available in the list */
+	long min, max;		/* min and max number of thread in the list */
+	spinlock_t lock;	/* synchronise all fields */
 	struct list_head all_threads;	/* root of all available threads */
 };
 
@@ -35,7 +37,10 @@ struct thd_pool {
 /**** exported functions ****/
 
 /* if min or max = -1, use default values */
-int thd_pool_init(struct thd_pool *thp, int min, int max);
+int thd_pool_init_raw(struct thd_pool *thp, int min, int max, int cpu, char *namefmt, ...);
+
+#define thd_pool_init(struct thd_pool *thp, char* namefmt, ...) \
+		thd_pool_init_raw(thp, -1,-1,-1, name, ## __VA_ARGS__);
 
 int thd_pool_rqst(struct thd_pool *thp, thd_pool_func *func, void*data);
 

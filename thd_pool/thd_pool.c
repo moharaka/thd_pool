@@ -81,8 +81,8 @@ static int thd_pool_create(struct thd_pool *thp, int num)
 
 	tpt->thd_pool = thp;
 	thd_pool_service_init(&tpt->service);
-	tpt->thd = kthread_run(thd_pool_main_loop, (void*)tpt, 
-				"%s_%d", "THD_POOL_THREAD", num);
+	tpt->thd = kthread_run_on_cpu(thd_pool_main_loop, (void*)tpt, 
+				thp->cpu, "%s_%d", thp->name, num);
 	if(!tpt->thd)
 	{
 		kfree(tpt);
@@ -96,15 +96,19 @@ nomem:
 	return ENOMEM;
 }
 
-int thd_pool_init(struct thd_pool *thp, int min, int max)
+int thd_pool_init_raw(struct thd_pool *thp, int min, int max, int cpu, char *namefmt, ...)
 {
 	int ret, i;
+	va_list args;
 
 	if(min <0)
 		min = THD_POLL_DEFAULT_MIN;
 	if(max <0)
 		max = THD_POLL_DEFAULT_MAX;
 
+	va_start(args, namefmt);
+	vsnprintf(thp->name, sizeof(thp->name), namefmt, args);
+	va_end(args);
 
 	thp->min = min;
 	thp->max = max;
@@ -129,7 +133,7 @@ err:
 static void thd_pool_refill(struct thd_pool *thp)
 {
 	spin_lock(&thp->lock);
-	if(thp->in_list >= thp->min || thp->in_list > thp_max)
+	if(thp->in_list >= thp->min || thp->in_list > thp->max)
 		goto unlock;
 	thd_pool_create(thp, thp->number++);
 unlock:

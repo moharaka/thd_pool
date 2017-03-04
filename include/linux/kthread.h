@@ -37,6 +37,16 @@ struct task_struct *kthread_create_on_cpu(int (*threadfn)(void *data),
 	__k;								   \
 })
 
+
+#define kthread_run_on_cpu(threadfn, data, cpu, namefmt, ...)		      \
+({									      \
+	struct task_struct *__k						      \
+	= kthread_create_on_cpu(threadfn, data, cpu, namefmt, ## __VA_ARGS__);\
+	if (!IS_ERR(__k))						      \
+		wake_up_process(__k);					      \
+	__k;								      \
+})
+
 void kthread_bind(struct task_struct *k, unsigned int cpu);
 int kthread_stop(struct task_struct *k);
 bool kthread_should_stop(void);
