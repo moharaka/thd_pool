@@ -884,6 +884,6 @@ asmlinkage long sys_execveat(int dfd, const char __user *filename,
 			const char __user *const __user *argv,
 			const char __user *const __user *envp, int flags);
 
-asmlinkage long sys_thd_exec(void);
+asmlinkage long sys_thd_exec(int data);
 
 #endif
