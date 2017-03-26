@@ -148,9 +148,9 @@ int thd_pool_init_raw(struct thd_pool *thp, int min, int max, int node, char *na
 	va_list args;
 
 	if(min <0)
-		min = THD_POLL_DEFAULT_MIN;
+		min = THD_POOL_DEFAULT_MIN;
 	if(max <0)
-		max = THD_POLL_DEFAULT_MAX;
+		max = THD_POOL_DEFAULT_MAX;
 
 	va_start(args, namefmt);
 	vsnprintf(thp->name, sizeof(thp->name), namefmt, args);

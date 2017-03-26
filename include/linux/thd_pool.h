@@ -3,8 +3,8 @@
 #include <linux/spinlock.h>
 
 #define THP_NAME_MAX 256
-#define THD_POLL_DEFAULT_MIN 3
-#define THD_POLL_DEFAULT_MAX 9
+#define THD_POOL_DEFAULT_MIN 3
+#define THD_POOL_DEFAULT_MAX 9
 
 typedef long thd_pool_func(void* data);
 
@@ -44,34 +44,37 @@ struct thd_pool {
 
 /**************************** Exported Functions ************************************/
 
-/* initiliase a thp_pool.					*
- * min, max: min and max number of threads (-1 default values)	*
- * node: pin all thread to a node, unless node egal -1		*
- * namefmt, ...: printf like arguments for name			*/
+/* initiliase a thp_pool.						*
+ * min, max: min and max number of threads (use -1  for default values)	*
+ * node: pin all thread to a node, unless node egal -1			*
+ * namefmt, ...: printf like arguments for name				*/
 int thd_pool_init_raw(struct thd_pool *thp, int min, int max, int node, char *namefmt, ...);
 
 /* same as thd_pool_init_raw but uses default values */
-//int thd_pool_init(struct thd_pool *thp, char *namefmt, ...);
+int thd_pool_init(struct thd_pool *thp, char *namefmt, ...);
 
 /* Destroy the pool. Should be called once there *
  * is no requests (No sychronisation is used) */
 void thd_pool_destroy(struct thd_pool *thp);
 
-/* requesting a service */
+/* requesting a service. The state->end variable can be polled to detectet *
+ * the end of the service. The return value should be in 'state->ret'.	*/
 int thd_pool_rqst_raw(struct thd_pool *thp, struct thd_pool_service *srv, 
 					struct thd_pool_srv_state *state);
 
-/* service with no return value */
-static inline int thd_pool_rqst(struct thd_pool *thp, thd_pool_func *func, void*data);
+/* service with no state argument. This is for service with no return value */
+static inline 
+int thd_pool_rqst(struct thd_pool *thp, thd_pool_func *func, void*data);
 
 
 
-/************************************* Private **************************************/
+/******************************************************************************/
 
 #define thd_pool_init(thp, namefmt, ...) \
 		thd_pool_init_raw(thp, -1,-1,-1, namefmt, ## __VA_ARGS__);
 
-static inline int thd_pool_rqst(struct thd_pool *thp, thd_pool_func *func, void*data) 
+static inline 
+int thd_pool_rqst(struct thd_pool *thp, thd_pool_func *func, void*data) 
 {
 	struct thd_pool_service srv = {func, data};
 	return thd_pool_rqst_raw(thp, &srv, NULL);
