@@ -87,60 +87,52 @@ void thd_pool_destroy(struct thd_pool *thp)
 }
 EXPORT_SYMBOL_GPL(thd_pool_destroy);
 
-
-/* create a thread if necessary */
-static int thd_pool_create(struct thd_pool *thp)
+static struct thd_pool_thread* __thd_pool_create(struct thd_pool *thp, long id)
 {
-	int ret;
-	long num;
 	struct thd_pool_thread *tpt;
 
-	ret = 0;
-
-	/* see if an allocatin is necessary */
-	spin_lock(&thp->lock);
-	if(thp->in_list >= thp->min || thp->in_list > thp->max)
-		goto unlock;
-	/* increment here, to avoid overcreating threads */
-	thp->in_list++;
-	num = thp->number++;
-	spin_unlock(&thp->lock);
 
 	/* Allocate all necessary memory */
 	tpt = kmalloc(sizeof(struct thd_pool_thread), GFP_KERNEL);
 	if(!tpt)
 		goto nomem;
 	tpt->tsk = kthread_create_on_node(thd_pool_main_loop, (void*)tpt, 
-				thp->node, "%s_%ld", thp->name, num);
+				thp->node, "%s_%ld", thp->name, id);
 	if (IS_ERR(tpt->tsk))
 		goto freetpt;
 
 	/* initialise the fields */
-	tpt->id = num;
+	tpt->id = id;
 	tpt->thd_pool = thp;
 	tpt->state = NULL;
 	thd_pool_service_init(&tpt->service);
 
-	/* register the new thread */
-	spin_lock(&thp->lock);
-	list_add(&tpt->list, &thp->all_threads);
-	printk("%s: a thd (id=%ld) created, in_list %ld, total %ld\n", 
-			__func__, tpt->id, thp->in_list, thp->number);
-	spin_unlock(&thp->lock);
-
-	return 0;
+	return tpt;
 
 freetpt:
 	kfree(tpt);
 nomem:
-	ret = ENOMEM;
-	spin_lock(&thp->lock);
-	thp->in_list--;
-	thp->number--;
-unlock:
-	spin_unlock(&thp->lock);
-	return ret;
+	return NULL;
 }
+
+int thd_pool_create(struct thd_pool *thp, long id)
+{
+	struct thd_pool_thread *tpt;
+	
+	tpt = __thd_pool_create(thp, id);
+	if(!tpt)
+		goto nomem;
+
+	list_add(&tpt->list, &thp->all_threads);
+
+	printk("%s: a thd (id=%ld) created, in_list %ld, total %ld\n", 
+			__func__, tpt->id, thp->in_list, id+1);
+
+	return 0;
+nomem:
+	return ENOMEM;
+}
+
 
 int thd_pool_init_raw(struct thd_pool *thp, int min, int max, int node, char *namefmt, ...)
 {
@@ -159,20 +151,18 @@ int thd_pool_init_raw(struct thd_pool *thp, int min, int max, int node, char *na
 	thp->min = min;
 	thp->max = max;
 	thp->node = node;
-
-	thp->number=0; /* incremented by thd_pool_create */
-	thp->in_list=0; /* incremented by thd_pool_pause*/
+	thp->number = min-1; 
+	thp->in_list = min-1;
 
 	spin_lock_init(&thp->lock);
 	INIT_LIST_HEAD(&thp->all_threads);
 
 	for(i=0; i<thp->min; i++)
 	{
-		ret = thd_pool_create(thp);
+		ret = thd_pool_create(thp, i);
 		if(ret) 
 			goto err;
 	}
-
 	return 0;
 err:
 	thd_pool_destroy(thp);
@@ -180,27 +170,39 @@ err:
 }
 EXPORT_SYMBOL_GPL(thd_pool_init_raw);
 
-static void thd_pool_refill(struct thd_pool *thp)
-{
-	thd_pool_create(thp);
-}
-
+/* get a thread from pool or create if absent */
 static struct thd_pool_thread* thd_pool_get(struct thd_pool *thp)
 {
+	long num;
 	struct thd_pool_thread *tpt;
 
-	thd_pool_refill(thp);
-
+	/* see if an allocatin is necessary */
 	spin_lock(&thp->lock);
+	if(thp->in_list >= thp->min || thp->in_list > thp->max)
+		goto fromlist;
+	/* increment here, to avoid overcreating threads */
+	thp->in_list++;
+	num = thp->number++;
+	spin_unlock(&thp->lock);
+
+	/* Allocate a tpt and return it */
+	tpt = __thd_pool_create(thp, num);
+	if(!tpt)
+		goto nomem;
+	return tpt;
+nomem:
+	spin_lock(&thp->lock);
+	thp->in_list--;
+	thp->number--;
+fromlist:
 	tpt = list_first_entry_or_null(&thp->all_threads, struct thd_pool_thread, list);
 	if(!tpt) 
-		goto notpt;
+		goto unlock;
 	list_del(&tpt->list);
 	thp->in_list--;
-notpt:
+unlock:
 	spin_unlock(&thp->lock);
 	return tpt;
-
 }
 
 
