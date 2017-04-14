@@ -51,7 +51,7 @@ static int thd_pool_pause_or_exit(struct thd_pool_thread *tpt)
 exit:	/* lock is held */
 	thp->number--;
 	kfree(tpt);
-	printk("%s: a thd (id=%ld) exited, in_list %ld, total %ld\n", 
+	pr_debug("%s: a thd (id=%ld) exited, in_list %ld, total %ld\n", 
 			__func__, tpt->id, thp->in_list, thp->number);
 	spin_unlock(&thp->lock);
 	return -1;
@@ -125,7 +125,7 @@ int thd_pool_create(struct thd_pool *thp, long id)
 
 	list_add(&tpt->list, &thp->all_threads);
 
-	printk("%s: a thd (id=%ld) created, in_list %ld, total %ld\n", 
+	pr_debug("%s: a thd (id=%ld) created, in_list %ld, total %ld\n", 
 			__func__, tpt->id, thp->in_list, id+1);
 
 	return 0;
@@ -151,6 +151,7 @@ int thd_pool_init_raw(struct thd_pool *thp, int min, int max, int node, char *na
 	thp->min = min;
 	thp->max = max;
 	thp->node = node;
+	thp->balance = 0;
 	thp->number = min-1; 
 	thp->in_list = min-1;
 
@@ -170,6 +171,47 @@ err:
 }
 EXPORT_SYMBOL_GPL(thd_pool_init_raw);
 
+#define THD_POOL_ADJUST_FREQ 100
+/* This function is called when a the of number in the list is positif.	*
+ * I tries to decrementing max in a balanced way.			*
+ * Note: lock should be held */
+static void balance_max_down(struct thd_pool *thp)
+{
+	/* if max equal min then return. Else try to decrement max.	*
+	 * This is because max cannot be smaller than min.		*/
+	if(thp->max == thp->min)
+	{
+		thp->balance = 0;
+		return;
+	}
+
+	/* if the number of element in the list is lower than min: don't *
+	 * decrement max */
+	if(thp->in_list <= thp->min)
+	{
+		thp->balance = 0;
+		return;
+	}
+
+	/* decrement max only if we were at least THD_POOL_ADJUST_FREQ 
+	 * times far from min */
+	thp->balance--;
+	if((thp->balance <= -THD_POOL_ADJUST_FREQ))
+	{
+		thp->balance = 0;
+		thp->max--;
+	}
+}
+
+/* lock should be held */
+static void balance_max_up(struct thd_pool *thp)
+{
+	/* decreases the chances of decreasing max */
+	thp->balance = thp->balance>0 ? thp->balance+1: 0;
+
+	thp->max++;
+}
+
 /* get a thread from pool or create if absent */
 static struct thd_pool_thread* thd_pool_get(struct thd_pool *thp)
 {
@@ -178,8 +220,14 @@ static struct thd_pool_thread* thd_pool_get(struct thd_pool *thp)
 
 	/* see if an allocatin is necessary */
 	spin_lock(&thp->lock);
-	if(thp->in_list >= thp->min || thp->in_list > thp->max)
+	if(thp->in_list > 0)
+	{
+		balance_max_down(thp);
 		goto fromlist;
+	}else{
+		/* nothing in the list increase max */
+		balance_max_up(thp);
+	}
 	/* increment here, to avoid overcreating threads */
 	thp->in_list++;
 	num = thp->number++;
@@ -216,9 +264,9 @@ int thd_pool_rqst_raw(struct thd_pool *thp, struct thd_pool_service *srv,
 		goto notpt;
 	tpt->service = *srv;
 	tpt->state = state;
-
 	/* make sure that the service has beed writeen before reading it */
 	smp_mb(); 
+
 	wake_up_process(tpt->tsk);
 
 	return 0;

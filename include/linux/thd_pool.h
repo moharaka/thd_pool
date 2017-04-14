@@ -37,6 +37,7 @@ struct thd_pool {
 	long number;		/* total number of created threads */
 	long in_list;		/* thread currently available in the list */
 	long min, max;		/* min and max number of thread in the list */
+	long balance;		/* variable used to balance 'max' */
 	spinlock_t lock;	/* synchronise all fields */
 	struct list_head all_threads;	/* root of all available threads */
 };
